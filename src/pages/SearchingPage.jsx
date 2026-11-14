@@ -9,6 +9,7 @@ import {
   generateArray,
 } from "../utils/algorithms";
 import { useBeep, successChord } from "../utils/soundUtils";
+import { API_BASE_URL } from "../utils/api";
 
 function responsiveCellCount() {
   if (typeof window === "undefined") return 48;
@@ -132,15 +133,11 @@ return -1`,
     if (running) return;
     const user = JSON.parse(localStorage.getItem("user"));
     if (user) {
-        fetch('http://localhost:5000/log-activity', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                userId: user.id, 
-                type: 'Searching', 
-                name: algorithm 
-            })
-        }).catch(e => console.error(e));
+        fetch(`${API_BASE_URL}/log-activity`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.id, type: "Searching", name: algorithm }),
+        }).catch((error) => console.error("Activity logging failed:", error));
     }
     setRunning(true);
     setHighlight([]);

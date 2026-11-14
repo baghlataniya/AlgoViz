@@ -1,18 +1,21 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Header } from "../components/Header"; // Reusing your existing Header component for consistency
+import { API_BASE_URL } from "../utils/api";
 
 export default function DashboardPage() {
   const [stats, setStats] = useState(null);
   const user = JSON.parse(localStorage.getItem("user"));
+  const userId = user?.id;
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!user) return navigate("/auth");
-    fetch(`http://localhost:5000/stats/${user.id}`)
-      .then(res => res.json())
-      .then(data => setStats(data));
-  }, []);
+    if (!userId) return navigate("/auth");
+    fetch(`${API_BASE_URL}/stats/${userId}`)
+      .then((response) => response.json())
+      .then((data) => setStats(data))
+      .catch(() => setStats({ total: 0, favorite: "None", history: [] }));
+  }, [navigate, userId]);
 
   const logout = () => {
     localStorage.clear();
@@ -57,7 +60,7 @@ export default function DashboardPage() {
       {/* History Table - Matches your list styles */}
       <div className="rounded-3xl bg-white/5 border border-white/10 overflow-hidden">
         <div className="p-6 border-b border-white/10 bg-white/5">
-          <h3 className="text-lg font-bold text-gray-200">Recent Database Logs</h3>
+          <h3 className="text-lg font-bold text-gray-200">Recent Activity</h3>
         </div>
         <div className="divide-y divide-white/5">
           {stats.history.map((log, i) => (
@@ -82,7 +85,7 @@ export default function DashboardPage() {
           ))}
           {stats.history.length === 0 && (
             <div className="p-12 text-center text-gray-500 italic">
-              No data in MySQL yet. Go run an algorithm!
+              No activity yet. Go run an algorithm!
             </div>
           )}
         </div>

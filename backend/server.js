@@ -1,86 +1,149 @@
-// backend/server.js
-import express from 'express';
-import mysql from 'mysql2';
-import cors from 'cors';
-import bodyParser from 'body-parser';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import express from "express";
+import process from "node:process";
+import { MongoClient, ObjectId } from "mongodb";
+import cors from "cors";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 const app = express();
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
-// --- DATABASE CONNECTION ---
-// REPLACE 'YOUR_PASSWORD' WITH YOUR ACTUAL MYSQL PASSWORD
-const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: 'dtg@1234', 
-    database: 'algoviz_db'
+const PORT = process.env.PORT || 5050;
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb://127.0.0.1:27017";
+const DATABASE_NAME = process.env.MONGODB_DATABASE || "algoviz_db";
+const SECRET_KEY = process.env.JWT_SECRET || "exam_secret";
+const mongoClient = new MongoClient(MONGODB_URI);
+
+let users;
+let activityLogs;
+
+function getUserId(value) {
+  return ObjectId.isValid(value) ? new ObjectId(value) : null;
+}
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", database: "mongodb" });
 });
 
-db.connect(err => {
-    if (err) console.error('DB Connection Failed:', err.message);
-    else console.log('Connected to MySQL Database with Triggers & Procedures');
-});
+app.post("/register", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required" });
+  }
 
-const SECRET_KEY = "exam_secret";
-
-// --- ROUTES ---
-
-// 1. REGISTER
-app.post('/register', (req, res) => {
-    const { username, password } = req.body;
-    const hash = bcrypt.hashSync(password, 8);
-    const sql = "INSERT INTO users (username, password) VALUES (?, ?)";
-    
-    db.query(sql, [username, hash], (err, result) => {
-        if (err) return res.status(500).json({ error: "Username already taken" });
-        res.status(200).json({ message: "Registered!" });
+  try {
+    const hash = await bcrypt.hash(password, 8);
+    const result = await users.insertOne({
+      username,
+      password: hash,
+      createdAt: new Date(),
+      lastActive: new Date(),
     });
+    res.status(201).json({ message: "Registered!", userId: result.insertedId });
+  } catch (error) {
+    if (error?.code === 11000) {
+      return res.status(409).json({ error: "Username already taken" });
+    }
+    console.error("Registration failed:", error);
+    res.status(500).json({ error: "Registration failed" });
+  }
 });
 
-// 2. LOGIN
-app.post('/login', (req, res) => {
-    const { username, password } = req.body;
-    const sql = "SELECT * FROM users WHERE username = ?";
-    
-    db.query(sql, [username], (err, results) => {
-        if (err || results.length === 0) return res.status(401).json({ error: "User not found" });
-        
-        const user = results[0];
-        const isValid = bcrypt.compareSync(password, user.password);
-        if (!isValid) return res.status(401).json({ error: "Wrong password" });
-        
-        const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '24h' });
-        res.status(200).json({ token, user: { id: user.id, username: user.username } });
+app.post("/login", async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password are required" });
+  }
+
+  try {
+    const user = await users.findOne({ username });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ error: "Invalid username or password" });
+    }
+
+    const token = jwt.sign({ id: user._id.toString() }, SECRET_KEY, { expiresIn: "24h" });
+    res.json({
+      token,
+      user: { id: user._id.toString(), username: user.username },
     });
+  } catch (error) {
+    console.error("Login failed:", error);
+    res.status(500).json({ error: "Login failed" });
+  }
 });
 
-// 3. LOG ACTIVITY
-app.post('/log-activity', (req, res) => {
-    const { userId, type, name } = req.body;
-    const sql = "INSERT INTO activity_logs (user_id, algorithm_type, algorithm_name) VALUES (?, ?, ?)";
-    
-    db.query(sql, [userId, type, name], (err) => {
-        if (err) return res.status(500).json({ error: "Log failed" });
-        res.status(200).json({ message: "Logged" });
+app.post("/log-activity", async (req, res) => {
+  const { userId, type, name } = req.body;
+  const objectUserId = getUserId(userId);
+  if (!objectUserId || !type || !name) {
+    return res.status(400).json({ error: "userId, type, and name are required" });
+  }
+
+  try {
+    const executionTime = new Date();
+    await activityLogs.insertOne({
+      userId: objectUserId,
+      algorithmType: type,
+      algorithmName: name,
+      executionTime,
     });
+    await users.updateOne({ _id: objectUserId }, { $set: { lastActive: executionTime } });
+    res.json({ message: "Logged" });
+  } catch (error) {
+    console.error("Activity logging failed:", error);
+    res.status(500).json({ error: "Log failed" });
+  }
 });
 
-// 4. GET STATS (Stored Procedure)
-app.get('/stats/:userId', (req, res) => {
-    const sql = "CALL get_user_dashboard(?)";
-    
-    db.query(sql, [req.params.userId], (err, results) => {
-        if (err) return res.status(500).json(err);
-        
-        const total = results[0][0]?.total || 0;
-        const favorite = results[1].length > 0 ? results[1][0].algorithm_name : "None";
-        const history = results[2];
-        
-        res.json({ total, favorite, history });
+app.get("/stats/:userId", async (req, res) => {
+  const userId = getUserId(req.params.userId);
+  if (!userId) return res.status(400).json({ error: "Invalid user ID" });
+
+  try {
+    const [total, favorite, history] = await Promise.all([
+      activityLogs.countDocuments({ userId }),
+      activityLogs
+        .aggregate([
+          { $match: { userId } },
+          { $group: { _id: "$algorithmName", count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+          { $limit: 1 },
+        ])
+        .next(),
+      activityLogs
+        .find({ userId })
+        .sort({ executionTime: -1 })
+        .limit(5)
+        .toArray(),
+    ]);
+
+    res.json({
+      total,
+      favorite: favorite?._id || "None",
+      history: history.map((log) => ({
+        algorithm_type: log.algorithmType,
+        algorithm_name: log.algorithmName,
+        execution_time: log.executionTime,
+      })),
     });
+  } catch (error) {
+    console.error("Stats lookup failed:", error);
+    res.status(500).json({ error: "Stats lookup failed" });
+  }
 });
 
-app.listen(5000, () => console.log("Backend running on port 5000"));
+async function startServer() {
+  await mongoClient.connect();
+  const database = mongoClient.db(DATABASE_NAME);
+  users = database.collection("users");
+  activityLogs = database.collection("activity_logs");
+  await users.createIndex({ username: 1 }, { unique: true });
+  console.log(`Connected to MongoDB database "${DATABASE_NAME}"`);
+  app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
+}
+
+startServer().catch((error) => {
+  console.error("Backend startup failed:", error);
+  process.exitCode = 1;
+});

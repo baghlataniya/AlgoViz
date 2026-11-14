@@ -6,6 +6,7 @@ import Button from "../components/Button";
 import { useBeep, successChord } from "../utils/soundUtils";
 import { createInitialGrid } from "../utils/gridUtils";
 import { bfsPath, dfsPath, dijkstraPath, aStarPath } from "../utils/algorithms";
+import { API_BASE_URL } from "../utils/api";
 
 const ALGORITHMS = [
   "Breadth-First Search (BFS)",
@@ -230,11 +231,11 @@ export default function PathfindingPage({ muted }) {
     if (running) return;
     const user = JSON.parse(localStorage.getItem("user"));
     if (user) {
-        fetch('http://localhost:5000/log-activity', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: user.id, type: 'Pathfinding', name: algorithm })
-        }).catch(e => console.error(e));
+        fetch(`${API_BASE_URL}/log-activity`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: user.id, type: "Pathfinding", name: algorithm }),
+        }).catch((error) => console.error("Activity logging failed:", error));
     }
     setRunning(true);
     clearPath();

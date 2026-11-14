@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { API_BASE_URL } from "../utils/api";
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -11,14 +12,14 @@ export default function AuthPage() {
     e.preventDefault();
     const endpoint = isLogin ? "/login" : "/register";
     try {
-      const res = await fetch(`http://localhost:5000${endpoint}`, {
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
-      const data = await res.json();
+      const data = await response.json();
 
-      if (res.ok) {
+      if (response.ok) {
         if (isLogin) {
           localStorage.setItem("user", JSON.stringify(data.user));
           navigate("/dashboard");
@@ -29,8 +30,8 @@ export default function AuthPage() {
       } else {
         setMsg(data.error);
       }
-    } catch (err) {
-      setMsg("Server not running.");
+    } catch {
+      setMsg("Unable to connect to the server.");
     }
   };
 
